@@ -16,6 +16,7 @@
 
 package com.microsoft.azure.cassandraproxy;
 
+import ch.qos.logback.classic.Level;
 import com.datastax.oss.protocol.internal.*;
 import com.datastax.oss.protocol.internal.request.Batch;
 import com.datastax.oss.protocol.internal.request.Prepare;
@@ -72,7 +73,7 @@ public class Proxy extends AbstractVerticle {
     private Map<ByteBuffer, Prepare> prepareMap = new ConcurrentHashMap<>();
     private Map<InetAddress, InetAddress> ghostProxyMap = Collections.unmodifiableMap(new HashMap<>());
     //TODO Move to cmd params
-    private KeyspaceReplacer keyspaceReplacer = new KeyspaceReplacer("fe_profiler", "fe_profiler2");
+
 
 
     public Proxy() {
@@ -94,7 +95,6 @@ public class Proxy extends AbstractVerticle {
         try {
             commandLine = cli.parse(Arrays.asList(args));
         } catch (CLIException e) {
-            System.out.println(e.getMessage());
             help(cli);
             System.exit(-1);
         }
@@ -121,11 +121,11 @@ public class Proxy extends AbstractVerticle {
 
         // set log level
         ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-//        if ((Boolean)commandLine.getOptionValue("debug")) {
-//            root.setLevel(Level.DEBUG);
-//        } else {
-//            root.setLevel(Level.WARN);
-//        }
+        if ((Boolean)commandLine.getOptionValue("debug")) {
+            root.setLevel(Level.DEBUG);
+        } else {
+            root.setLevel(Level.WARN);
+        }
 
         VertxOptions options = new VertxOptions();
         //  Micrometer
@@ -149,7 +149,6 @@ public class Proxy extends AbstractVerticle {
     private static void help(CLI cli) {
         StringBuilder builder = new StringBuilder();
         cli.usage(builder);
-        System.out.print(builder.toString());
     }
 
     @Override
@@ -162,11 +161,9 @@ public class Proxy extends AbstractVerticle {
                     .addKeyPath(commandLine.getOptionValue("proxy-pem-keyfile"));
             options.setSsl(true).setPemKeyCertOptions(pemOptions);
         } else if (commandLine.getOptionValue("proxy-pem-keyfile") != null || commandLine.getOptionValue("proxy-pem-certfile") != null) {
-            System.out.println("Both proxy-pem-keyfile and proxy-pem-certfile need to be set for TLS");
             LOG.error("Both proxy-pem-keyfile and proxy-pem-certfile need to be set for TLS");
             System.exit(-1);
         } else if (commandLine.getOptionValue("proxy-pem-keyfile") != null && commandLine.getOptionValue("proxy-pem-certfile") != null && commandLine.getOptionValue("proxy-jks-file") != null) {
-            System.out.println("Only proxy-pem-keyfile and proxy-pem-certfile OR proxy-jks-file can to be set for TLS");
             LOG.error("Only proxy-pem-keyfile and proxy-pem-certfile OR proxy-jks-file can to be set for TLS");
             System.exit(-1);
         } else if (commandLine.getOptionValue("proxy-jks-file") != null) {
@@ -181,7 +178,6 @@ public class Proxy extends AbstractVerticle {
         if (username != null && username.length() > 0 && password != null && password.length() > 0) {
             credential = new Credential(username, password);
         } else if ((username != null && username.length() > 0) || password != null && password.length() > 0) {
-            System.out.println("Both target-username and target-password need to be set if you have different accounts on the target system");
             LOG.error("Both target-username and target-password need to be set if you have different accounts on the target system");
             System.exit(-1);
         }
@@ -227,7 +223,8 @@ public class Proxy extends AbstractVerticle {
             socket.setWriteQueueMaxSize((Integer) commandLine.getOptionValue("write-buffer-size"));
             ProxyClient client1 = new ProxyClient(commandLine.getOptionValue("source-identifier"), socket, protocolVersions, commandLine.getOptionValues("cql-version"), commandLine.getOptionValues("compression"), commandLine.getOptionValue("compression-enabled"), commandLine.getOptionValue("metrics"), commandLine.getOptionValue("wait"), null, null);
             Future c1 = client1.start(vertx, commandLine.getArgumentValue("source"), commandLine.getOptionValue("source-port"), !(Boolean) commandLine.getOptionValue("disable-source-tls"), idleTimeOut);
-            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"), (Boolean) commandLine.getOptionValue("metrics"), credential, keyspaceReplacer);
+
+            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"), (Boolean) commandLine.getOptionValue("metrics"), credential, KeyspaceReplacer.buildFromCli(commandLine));
             Future c2 = client2.start(vertx, commandLine.getArgumentValue("target"), commandLine.getOptionValue("target-port"), !(Boolean) commandLine.getOptionValue("disable-target-tls"), idleTimeOut);
             LOG.info("Connection to both Cassandra servers up)");
             FastDecode fastDecode = FastDecode.newFixed(socket, buffer -> {

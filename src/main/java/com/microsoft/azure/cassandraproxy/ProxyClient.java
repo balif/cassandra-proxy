@@ -143,7 +143,6 @@ public class ProxyClient {
 
 
     private void write(Buffer buffer) {
-        System.out.println(identifier + " " + buffer.toString());
         // Do we need to substitute the queryId ?
         if (serverSocket == null) {
             buffer = replacePrepQueryId(buffer);
@@ -186,7 +185,6 @@ public class ProxyClient {
         Frame f = serverCodec.decode(buffer2);
         Execute execute = (Execute) f.message;
         LOG.debug("Need to substitute prepared query id {}", execute.queryId);
-        System.out.println("Need to substitute prepared query id" + execute.queryId);
         if (prepareSubstitution.containsKey(Bytes.toHexString(execute.queryId))) {
             Execute newExecute = new Execute(prepareSubstitution.get(Bytes.toHexString(execute.queryId)), execute.resultMetadataId, execute.options);
             LOG.debug("Substituting {} for {}", execute, newExecute);
@@ -303,8 +301,9 @@ public class ProxyClient {
     }
 
     private Buffer replaceKeyspace(Buffer buffer) {
-        String bufferString = buffer.toString();
-//        System.out.println(identifier + " replaceKeyspaceOnTargetWrite" + " " + bufferString);
+        if(keyspaceReplacer==null){
+            return buffer;
+        }
         FastDecode.State state = FastDecode.quickLook(buffer);
         if (state == FastDecode.State.analyze || state == FastDecode.State.error) {
             return buffer;
@@ -315,12 +314,10 @@ public class ProxyClient {
         if (message.isResponse) {
             throw new IllegalArgumentException("Cant process response");
         }
-//        System.out.println("replaceKeyspaceOnTargetWrite message" + message);
         if (message instanceof Query) {
             Query query = (Query) message;
             String newQuery = keyspaceReplacer.replaceQueryKeyspace(query.query);
 
-//            System.out.println("newQuery" + newQuery);
             QueryOptions existingQueryOptions = query.options;
             QueryOptions newQueryOptions = new QueryOptions(
                     existingQueryOptions.flags,
@@ -353,7 +350,6 @@ public class ProxyClient {
                     return keyspaceReplacer.replaceQueryKeyspace((String) o);
                 } else {
                     byte[] bytes = (byte[]) o;
-                    System.out.println("mess.queryId" + Bytes.toHexString(bytes));
                     byte[] targetQId = prepareSubstitution.get(Bytes.toHexString(bytes));
                     if (targetQId != null){
                         return targetQId;

@@ -10,6 +10,14 @@ import static com.microsoft.azure.cassandraproxy.Proxy.PROTOCOL_VERSION;
 
 public class CliBuilder {
 
+    public static final Option KESPACE_REPLACE_OPTION = new Option()
+            .setLongName("keyspace-replace")
+            .setShortName("kr")
+            .setRequired(false)
+            .setDescription("Two keyspaces separated by a comma. " +
+                    "The first keyspace is the source keyspace, and the second is the new keyspace in the target. " +
+                    "For example: my_old_keyspace,my_new_keyspace.");
+
     public static CLI build() {
         CLI cli = CLI.create("cassandra-proxy")
                 .setSummary("A dual write proxy for cassandra.")
@@ -154,7 +162,9 @@ public class CliBuilder {
                         .setLongName("ghostIps")
                         .setDescription("list ips to be replaced, e.g. {\"10.25.0.2\":\"192.168.1.4\",...} "
                                 + " - this will replace the ip in system.peers with the other one in queries to "
-                                + "allow running the proxy on different ips from the source cluster"));
+                                + "allow running the proxy on different ips from the source cluster"))
+                .addOption(KESPACE_REPLACE_OPTION)
+                ;
 
         return cli;
     }
