@@ -63,6 +63,22 @@
             <artifactId>logback-classic</artifactId>
             <version>1.2.11</version>
         </dependency>
+        <dependency>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-core</artifactId>
+            <version>4.17.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-query-builder</artifactId>
+            <version>4.17.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-mapper-runtime</artifactId>
+            <version>4.17.0</version>
+        </dependency>
     </dependencies>
 <build>
     <plugins>
@@ -91,16 +107,16 @@
                 </execution>
             </executions>
         </plugin>
-        <!-- <plugin>
+        <plugin>
             <groupId>com.google.cloud.tools</groupId>
             <artifactId>jib-maven-plugin</artifactId>
-            <version>1.6.1</version>
+            <version>3.2.0</version>
             <configuration>
                 <from>
                     <image>openjdk:11.0.4-jre-slim</image>
                 </from>
                 <to>
-                    <image>cosmos.microsoft.com/${project.artifactId}:latest</image>
+                    <image>registry-k8s.agora.pl/${project.artifactId}:latest</image>
                 </to>
                 <container>
                     <jvmFlags>
@@ -117,7 +133,7 @@
                     </goals>
                 </execution>
             </executions>
-        </plugin> -->
+        </plugin>
     </plugins>
 </build>
     <profiles>

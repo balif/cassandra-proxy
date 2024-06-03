@@ -18,7 +18,6 @@ package com.microsoft.azure.cassandraproxy;
 
 import com.datastax.oss.protocol.internal.*;
 import com.datastax.oss.protocol.internal.request.Batch;
-import com.datastax.oss.protocol.internal.request.Execute;
 import com.datastax.oss.protocol.internal.request.Prepare;
 import com.datastax.oss.protocol.internal.request.Query;
 import com.datastax.oss.protocol.internal.response.Error;
@@ -33,7 +32,6 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.cli.*;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.impl.ConcurrentHashSet;
-import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.*;
 import io.vertx.micrometer.MicrometerMetricsOptions;
@@ -49,7 +47,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ch.qos.logback.classic.Level;
 
 import java.util.regex.Pattern;
 
@@ -62,17 +59,20 @@ public class Proxy extends AbstractVerticle {
     public static final String CASSANDRA_SERVER_PORT = "29042";
     public static final String PROTOCOL_VERSION = "protocol-version";
     private static final String PEERS = "SYSTEM.PEERS";
-    private static final String PEERS_V2 = "SYSTEM.PEERS_V2" ;
+    private static final String PEERS_V2 = "SYSTEM.PEERS_V2";
+    public static final BufferCodec BUFFER_CODEC = new BufferCodec();
     private static CommandLine commandLine;
-    private BufferCodec bufferCodec = new BufferCodec();
+    private BufferCodec bufferCodec = BUFFER_CODEC;
     private FrameCodec<BufferCodec.PrimitiveBuffer> serverCodec = FrameCodec.defaultServer(bufferCodec, Compressor.none());
     private FrameCodec<BufferCodec.PrimitiveBuffer> clientCodec = FrameCodec.defaultClient(bufferCodec, Compressor.none());
     private final UUIDGenWrapper uuidGenWrapper;
     private Credential credential;
     private Pattern pattern;
     private Set<ByteBuffer> filterPreparedQueries = new ConcurrentHashSet<>();
-    private Map<ByteBuffer, Prepare> prepareMap= new ConcurrentHashMap<>();
+    private Map<ByteBuffer, Prepare> prepareMap = new ConcurrentHashMap<>();
     private Map<InetAddress, InetAddress> ghostProxyMap = Collections.unmodifiableMap(new HashMap<>());
+    //TODO Move to cmd params
+    private KeyspaceReplacer keyspaceReplacer = new KeyspaceReplacer("fe_profiler", "fe_profiler2");
 
 
     public Proxy() {
@@ -120,24 +120,24 @@ public class Proxy extends AbstractVerticle {
         LOG.info("Cassandra Proxy starting...");
 
         // set log level
-        ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger)LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-        if ((Boolean)commandLine.getOptionValue("debug")) {
-            root.setLevel(Level.DEBUG);
-        } else {
-            root.setLevel(Level.WARN);
-        }
+        ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+//        if ((Boolean)commandLine.getOptionValue("debug")) {
+//            root.setLevel(Level.DEBUG);
+//        } else {
+//            root.setLevel(Level.WARN);
+//        }
 
         VertxOptions options = new VertxOptions();
         //  Micrometer
-        if ((Boolean)commandLine.getOptionValue("metrics")) {
+        if ((Boolean) commandLine.getOptionValue("metrics")) {
             options.setMetricsOptions(
                     new MicrometerMetricsOptions()
                             .setPrometheusOptions(new VertxPrometheusOptions().setEnabled(true)
                                     .setStartEmbeddedServer(true)
                                     .setEmbeddedServerOptions(new HttpServerOptions().setPort(commandLine.getOptionValue("metrics-port"))))
-                                    .setEnabled(true)
-                                    .setJvmMetricsEnabled(true));
-            LOG.info("Cassandra Proxy Metrics at port: {}", (Integer)commandLine.getOptionValue("metrics-port"));
+                            .setEnabled(true)
+                            .setJvmMetricsEnabled(true));
+            LOG.info("Cassandra Proxy Metrics at port: {}", (Integer) commandLine.getOptionValue("metrics-port"));
         }
 
         Vertx vertx = Vertx.vertx(options);
@@ -178,9 +178,9 @@ public class Proxy extends AbstractVerticle {
 
         String username = commandLine.getOptionValue("target-username");
         String password = commandLine.getOptionValue("target-password");
-        if (username!=null && username.length()>0 && password != null && password.length()>0) {
+        if (username != null && username.length() > 0 && password != null && password.length() > 0) {
             credential = new Credential(username, password);
-        } else if ((username!=null && username.length()>0 ) || password != null && password.length()>0) {
+        } else if ((username != null && username.length() > 0) || password != null && password.length() > 0) {
             System.out.println("Both target-username and target-password need to be set if you have different accounts on the target system");
             LOG.error("Both target-username and target-password need to be set if you have different accounts on the target system");
             System.exit(-1);
@@ -207,11 +207,11 @@ public class Proxy extends AbstractVerticle {
             }
             Map<InetAddress, InetAddress> map = new HashMap<>();
             for (Map.Entry<String, Object> ips : object) {
-                if (!(ips.getValue() instanceof  String)) {
+                if (!(ips.getValue() instanceof String)) {
                     LOG.error("Can't parse ghotsIp" + object);
                     System.exit(1);
                 }
-               map.put(InetAddress.getByName(ips.getKey()), InetAddress.getByName((String)ips.getValue()));
+                map.put(InetAddress.getByName(ips.getKey()), InetAddress.getByName((String) ips.getValue()));
             }
             this.ghostProxyMap = Collections.unmodifiableMap(map);
         }
@@ -224,15 +224,16 @@ public class Proxy extends AbstractVerticle {
 
         server.connectHandler(socket -> {
             // increase the buffer for back pressure
-            socket.setWriteQueueMaxSize((Integer)commandLine.getOptionValue("write-buffer-size"));
-            ProxyClient client1 = new ProxyClient(commandLine.getOptionValue("source-identifier"), socket, protocolVersions, commandLine.getOptionValues("cql-version"), commandLine.getOptionValues("compression"), commandLine.getOptionValue("compression-enabled"),commandLine.getOptionValue("metrics"), commandLine.getOptionValue("wait"), null);
-            Future c1 = client1.start(vertx, commandLine.getArgumentValue("source"), commandLine.getOptionValue("source-port"), !(Boolean)commandLine.getOptionValue("disable-source-tls"), idleTimeOut);
-            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"),  (Boolean)commandLine.getOptionValue("metrics"), credential);
-            Future c2 = client2.start(vertx, commandLine.getArgumentValue("target"), commandLine.getOptionValue("target-port"),  !(Boolean)commandLine.getOptionValue("disable-target-tls"), idleTimeOut);
+            socket.setWriteQueueMaxSize((Integer) commandLine.getOptionValue("write-buffer-size"));
+            ProxyClient client1 = new ProxyClient(commandLine.getOptionValue("source-identifier"), socket, protocolVersions, commandLine.getOptionValues("cql-version"), commandLine.getOptionValues("compression"), commandLine.getOptionValue("compression-enabled"), commandLine.getOptionValue("metrics"), commandLine.getOptionValue("wait"), null, null);
+            Future c1 = client1.start(vertx, commandLine.getArgumentValue("source"), commandLine.getOptionValue("source-port"), !(Boolean) commandLine.getOptionValue("disable-source-tls"), idleTimeOut);
+            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"), (Boolean) commandLine.getOptionValue("metrics"), credential, keyspaceReplacer);
+            Future c2 = client2.start(vertx, commandLine.getArgumentValue("target"), commandLine.getOptionValue("target-port"), !(Boolean) commandLine.getOptionValue("disable-target-tls"), idleTimeOut);
             LOG.info("Connection to both Cassandra servers up)");
             FastDecode fastDecode = FastDecode.newFixed(socket, buffer -> {
+
                 try {
-                    if (client1.isClosed() || ((Boolean)commandLine.getOptionValue("dest-close") && client2.isClosed())) {
+                    if (client1.isClosed() || ((Boolean) commandLine.getOptionValue("dest-close") && client2.isClosed())) {
                         client1.close();
                         client2.close();
                         socket.end();
@@ -260,8 +261,8 @@ public class Proxy extends AbstractVerticle {
                         buffer = handleUUID(buffer);
                     }
 
-                    boolean ghostProxy =  (!ghostProxyMap.isEmpty())
-                            && state == FastDecode.State.query && (scanForPeers(buffer) || scanForPeersV2(buffer)) ;
+                    boolean ghostProxy = (!ghostProxyMap.isEmpty())
+                            && state == FastDecode.State.query && (scanForPeers(buffer) || scanForPeersV2(buffer));
 
                     Prepare keyspaceTable = null;
                     if (state == FastDecode.State.prepare) {
@@ -280,7 +281,7 @@ public class Proxy extends AbstractVerticle {
                             byte[] b = FastDecode.getQueryId(buffer);
                             Prepare prepare = prepareMap.get(ByteBuffer.wrap(b));
                             if (prepare != null) {
-                                LOG.error("Destination down - writing only to source. Prepared Statement Keyspace: " + prepare.keyspace + " Query: " + prepare.cqlQuery );
+                                LOG.error("Destination down - writing only to source. Prepared Statement Keyspace: " + prepare.keyspace + " Query: " + prepare.cqlQuery);
                             } else {
                                 LOG.error("Destination down - writing only to source. Prepared Statement not found");
                             }
@@ -356,13 +357,12 @@ public class Proxy extends AbstractVerticle {
                             boolean unprepared = checkUnpreparedTarget(state, f2.result());
                             if (!unprepared && !(buf.equals(f2.result())) &&
                                     (FastDecode.quickLook(f2.result()) == FastDecode.State.error) &&
-                                    (sourceState != FastDecode.State.error))
-                            {
+                                    (sourceState != FastDecode.State.error)) {
                                 BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buf);
                                 Frame r1 = clientCodec.decode(buffer2);
                                 buffer2 = BufferCodec.createPrimitiveBuffer(f2.result());
                                 Frame r2 = clientCodec.decode(buffer2);
-                                
+
                                 int errorCode = -1;
                                 if (r2.message instanceof Error) {
                                     Error error = (Error) r2.message;
@@ -376,7 +376,7 @@ public class Proxy extends AbstractVerticle {
                                     byte[] b = FastDecode.getQueryId(clientBuffer);
                                     Prepare prepare = prepareMap.get(ByteBuffer.wrap(b));
                                     if (prepare != null) {
-                                        LOG.error("Error only target: Prepared Statement Keyspace: " + prepare.keyspace + " Query: " + prepare.cqlQuery );
+                                        LOG.error("Error only target: Prepared Statement Keyspace: " + prepare.keyspace + " Query: " + prepare.cqlQuery);
                                     } else {
                                         LOG.error("Error only target: Prepared Statement not found");
                                     }
@@ -450,6 +450,7 @@ public class Proxy extends AbstractVerticle {
         });
 
     }
+
 
     // we neeed to substitute the ips in system,peer with our own
     // TODO: test with system.peers_v2 !!!
@@ -541,7 +542,7 @@ public class Proxy extends AbstractVerticle {
         Error e = new Error(10, supported.toString());
         int streamId = buffer.getShort(2);
         Frame f = Frame.forResponse((Integer) commandLine.getOptionValues(PROTOCOL_VERSION).get(0), streamId, null, Collections.emptyMap(), Collections.emptyList(), e);
-        if ((Boolean)commandLine.getOptionValue("metrics")) {
+        if ((Boolean) commandLine.getOptionValue("metrics")) {
             MeterRegistry registry = BackendRegistries.getDefaultNow();
             Timer.builder("cassandraProxy.cqlOperation.proxyTime")
                     .tag("requestOpcode", String.valueOf(opcode))
@@ -580,7 +581,7 @@ public class Proxy extends AbstractVerticle {
                 LOG.warn("Resuming processing");
                 client1.resume();
                 client2.resume();
-                if ((Boolean)commandLine.getOptionValue("metrics")) {
+                if ((Boolean) commandLine.getOptionValue("metrics")) {
                     MeterRegistry registry = BackendRegistries.getDefaultNow();
                     Timer.builder("cassandraProxy.clientSocket.paused")
                             .tag("clientAddress", socket.remoteAddress().toString())
@@ -604,7 +605,7 @@ public class Proxy extends AbstractVerticle {
         // Ignore prepared since we handle that elsewhere and create a substitution, no need to count that
         // against us.
         if (state != FastDecode.State.prepare
-                && !FastDecode.getMessage(f1.result(), ((Boolean)commandLine.getOptionValue("only-message"))).equals(FastDecode.getMessage(f2.result(), (Boolean)commandLine.getOptionValue("only-message")))) {
+                && !FastDecode.getMessage(f1.result(), ((Boolean) commandLine.getOptionValue("only-message"))).equals(FastDecode.getMessage(f2.result(), (Boolean) commandLine.getOptionValue("only-message")))) {
             try {
                 // Turns out some implementations encode the result differentlty so we need to parse to be sure
                 Counter.builder("cassandraProxy.cqlOperation.cqlDifferentResultCount")
@@ -639,8 +640,8 @@ public class Proxy extends AbstractVerticle {
                 .register(registry)
                 .record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
         short streamId = buf.getShort(2);
-        sendProxyClientMetric("cassandraProxy.cqlOperationSourceCassandra.timer",opcode, state, client1, registry, streamId);
-        sendProxyClientMetric("cassandraProxy.cqlOperationTargetCassandra.timer",opcode, state, client2, registry, streamId);
+        sendProxyClientMetric("cassandraProxy.cqlOperationSourceCassandra.timer", opcode, state, client1, registry, streamId);
+        sendProxyClientMetric("cassandraProxy.cqlOperationTargetCassandra.timer", opcode, state, client2, registry, streamId);
     }
 
     private void sendProxyClientMetric(String metricName, int opcode, FastDecode.State state, ProxyClient client1, MeterRegistry registry, short streamId) {
@@ -651,7 +652,7 @@ public class Proxy extends AbstractVerticle {
                     .tag("requestOpcode", String.valueOf(opcode))
                     .tag("requestState", state.toString())
                     .register(registry)
-                    .record(sourceEnd-sourceStart, TimeUnit.NANOSECONDS);
+                    .record(sourceEnd - sourceStart, TimeUnit.NANOSECONDS);
         }
     }
 
@@ -659,7 +660,7 @@ public class Proxy extends AbstractVerticle {
         BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buffer);
         try {
             Frame f = serverCodec.decode(buffer2);
-            LOG.info("Recieved: {}",  f.message);
+            LOG.info("Recieved: {}", f.message);
             Message newMessage = f.message;
             if (f.message instanceof Query) {
                 Query q = (Query) f.message;

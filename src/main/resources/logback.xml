@@ -11,11 +11,11 @@
         <appender-ref ref="STDOUT"/>
     </appender>
 
-    <logger name="io.netty" level="WARN"/>
-    <logger name="io.micrometer" level="WARN"/>
+    <logger name="io.netty" level="INFO"/>
+    <logger name="io.micrometer" level="INFO"/>
     <logger name="io.vertx" level="INFO"/>
 
     <root level="INFO">
-        <appender-ref ref="ASYNC-VERSION-APPENDER" />
+        <appender-ref ref="STDOUT" />
     </root>
 </configuration>
