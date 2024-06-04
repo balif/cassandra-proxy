@@ -177,7 +177,7 @@ public class Proxy extends AbstractVerticle {
         String password = commandLine.getOptionValue("target-password");
         if (username != null && username.length() > 0 && password != null && password.length() > 0) {
             credential = new Credential(username, password);
-        } else if ((username != null && username.length() > 0) || password != null && password.length() > 0) {
+        } else if ((username!=null && username.length()>0 ) || password != null && password.length()>0) {
             LOG.error("Both target-username and target-password need to be set if you have different accounts on the target system");
             System.exit(-1);
         }
@@ -321,7 +321,6 @@ public class Proxy extends AbstractVerticle {
                         CompositeFuture.all(f1, f2).onComplete(e -> {
                             Buffer buf = f1.result();
                             FastDecode.State sourceState = FastDecode.quickLook(buf);
-
                             if (state == FastDecode.State.prepare && !(buf.equals(f2.result()))) {
                                 // check if we need to substitute
                                 BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buf);

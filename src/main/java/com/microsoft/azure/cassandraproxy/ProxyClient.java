@@ -42,6 +42,7 @@ public class ProxyClient {
     private static final BufferCodec bufferCodec = new BufferCodec();
     private static final FrameCodec<BufferCodec.PrimitiveBuffer> serverCodec = FrameCodec.defaultServer(bufferCodec, Compressor.none());
     private static final FrameCodec<BufferCodec.PrimitiveBuffer> clientCodec = FrameCodec.defaultClient(bufferCodec, Compressor.none());
+    public static final int TARGET_AUTH_STREMID = -2;
     private final String identifier;
     private final List<String> protocolVersions;
     private final List<String> cqlVersions;
@@ -199,6 +200,16 @@ public class ProxyClient {
 
     private void clientHandle(Buffer buffer) {
         FastDecode.State state = fastDecode.quickLook(buffer);
+
+        // its for handle case: source not have authorization and target has authorization
+        if(serverSocket==null){
+            BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buffer);
+            Frame r = clientCodec.decode(buffer2);
+            if(r.message.opcode==ProtocolConstants.Opcode.AUTHENTICATE) {
+                Frame autFram = Frame.forRequest(r.protocolVersion, TARGET_AUTH_STREMID, r.tracing, r.customPayload, credential.replaceAuthentication(null));
+                write(clientCodec.encode(autFram).buffer);
+            }
+        }
         // Handle Supported
         if ((serverSocket != null) && (state == FastDecode.State.supported) && (!protocolVersions.isEmpty() || !cqlVersions.isEmpty() || !compressions.isEmpty())) {
             BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buffer);
@@ -272,6 +283,10 @@ public class ProxyClient {
                 LOG.warn("out of band: {}", buffer);
             }
             results.remove(streamId); // we are done with that
+        } else if (streamId == TARGET_AUTH_STREMID) {
+            BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buffer);
+            Frame frame = clientCodec.decode(buffer2);
+            LOG.info("Target auth respnse " + frame.message);
         } else if (streamId != -1) { //-1 is EVENT
             LOG.warn("Stream Id {} no registered. Are you using TLS on a non TLS connection?", streamId);
         }
