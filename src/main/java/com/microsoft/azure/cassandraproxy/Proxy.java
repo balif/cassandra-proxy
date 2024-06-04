@@ -94,7 +94,6 @@ public class Proxy extends AbstractVerticle {
         try {
             commandLine = cli.parse(Arrays.asList(args));
         } catch (CLIException e) {
-            System.out.println(e.getMessage());
             help(cli);
             System.exit(-1);
         }
@@ -149,7 +148,6 @@ public class Proxy extends AbstractVerticle {
     private static void help(CLI cli) {
         StringBuilder builder = new StringBuilder();
         cli.usage(builder);
-        System.out.print(builder.toString());
     }
 
     @Override
@@ -162,11 +160,9 @@ public class Proxy extends AbstractVerticle {
                     .addKeyPath(commandLine.getOptionValue("proxy-pem-keyfile"));
             options.setSsl(true).setPemKeyCertOptions(pemOptions);
         } else if (commandLine.getOptionValue("proxy-pem-keyfile") != null || commandLine.getOptionValue("proxy-pem-certfile") != null) {
-            System.out.println("Both proxy-pem-keyfile and proxy-pem-certfile need to be set for TLS");
             LOG.error("Both proxy-pem-keyfile and proxy-pem-certfile need to be set for TLS");
             System.exit(-1);
         } else if (commandLine.getOptionValue("proxy-pem-keyfile") != null && commandLine.getOptionValue("proxy-pem-certfile") != null && commandLine.getOptionValue("proxy-jks-file") != null) {
-            System.out.println("Only proxy-pem-keyfile and proxy-pem-certfile OR proxy-jks-file can to be set for TLS");
             LOG.error("Only proxy-pem-keyfile and proxy-pem-certfile OR proxy-jks-file can to be set for TLS");
             System.exit(-1);
         } else if (commandLine.getOptionValue("proxy-jks-file") != null) {
@@ -181,7 +177,6 @@ public class Proxy extends AbstractVerticle {
         if (username!=null && username.length()>0 && password != null && password.length()>0) {
             credential = new Credential(username, password);
         } else if ((username!=null && username.length()>0 ) || password != null && password.length()>0) {
-            System.out.println("Both target-username and target-password need to be set if you have different accounts on the target system");
             LOG.error("Both target-username and target-password need to be set if you have different accounts on the target system");
             System.exit(-1);
         }
@@ -323,7 +318,6 @@ public class Proxy extends AbstractVerticle {
                         CompositeFuture.all(f1, f2).onComplete(e -> {
                             Buffer buf = f1.result();
                             FastDecode.State sourceState = FastDecode.quickLook(buf);
-
                             if (state == FastDecode.State.prepare && !(buf.equals(f2.result()))) {
                                 // check if we need to substitute
                                 BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(buf);
