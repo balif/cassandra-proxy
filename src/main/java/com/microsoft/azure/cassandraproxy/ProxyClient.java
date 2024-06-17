@@ -64,6 +64,7 @@ public class ProxyClient {
     // Prepared statements are only cached for the duration of a session (@TODO: Confirm)
     // but we will cache them for the life of the proxy to save memory
     private static Map<String, byte[]> prepareSubstitution = new ConcurrentHashMap<>();
+    private static Map<String, byte[]> prepareSubstitutionTargetToSource = new ConcurrentHashMap<>();
     private boolean closed = false;
     // for metrics
     private Map<Short, Long> startTime = new ConcurrentHashMap<>();
@@ -294,6 +295,11 @@ public class ProxyClient {
 
     public void addPrepareSubstitution(byte[] orig, byte[] target) {
         this.prepareSubstitution.put(Bytes.toHexString(orig), target);
+        this.prepareSubstitutionTargetToSource.put(Bytes.toHexString(target), orig);
+    }
+
+    public byte[] mapTargetQueryIdToSourceQueryId(byte[] target){
+        return this.prepareSubstitutionTargetToSource.get(Bytes.toHexString(target));
     }
 
     public void close() {
@@ -370,7 +376,7 @@ public class ProxyClient {
                         return targetQId;
                     }
                     {
-                        LOG.error("Missing prepered statement id mapping");
+                        LOG.error("Missing prepered statement id mapping ");
                         return o;
                     }
                 }

@@ -22,6 +22,7 @@ import com.datastax.oss.protocol.internal.request.Batch;
 import com.datastax.oss.protocol.internal.request.Prepare;
 import com.datastax.oss.protocol.internal.request.Query;
 import com.datastax.oss.protocol.internal.response.Error;
+import com.datastax.oss.protocol.internal.response.error.Unprepared;
 import com.datastax.oss.protocol.internal.response.result.ColumnSpec;
 import com.datastax.oss.protocol.internal.response.result.DefaultRows;
 import com.datastax.oss.protocol.internal.response.result.Prepared;
@@ -72,8 +73,8 @@ public class Proxy extends AbstractVerticle {
     private Set<ByteBuffer> filterPreparedQueries = new ConcurrentHashSet<>();
     private Map<ByteBuffer, Prepare> prepareMap = new ConcurrentHashMap<>();
     private Map<InetAddress, InetAddress> ghostProxyMap = Collections.unmodifiableMap(new HashMap<>());
+    private KeyspaceReplacer keyspaceReplacer;
     //TODO Move to cmd params
-
 
 
     public Proxy() {
@@ -121,7 +122,7 @@ public class Proxy extends AbstractVerticle {
 
         // set log level
         ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-        if ((Boolean)commandLine.getOptionValue("debug")) {
+        if ((Boolean) commandLine.getOptionValue("debug")) {
             root.setLevel(Level.DEBUG);
         } else {
             root.setLevel(Level.WARN);
@@ -177,7 +178,7 @@ public class Proxy extends AbstractVerticle {
         String password = commandLine.getOptionValue("target-password");
         if (username != null && username.length() > 0 && password != null && password.length() > 0) {
             credential = new Credential(username, password);
-        } else if ((username!=null && username.length()>0 ) || password != null && password.length()>0) {
+        } else if ((username != null && username.length() > 0) || password != null && password.length() > 0) {
             LOG.error("Both target-username and target-password need to be set if you have different accounts on the target system");
             System.exit(-1);
         }
@@ -224,7 +225,8 @@ public class Proxy extends AbstractVerticle {
             ProxyClient client1 = new ProxyClient(commandLine.getOptionValue("source-identifier"), socket, protocolVersions, commandLine.getOptionValues("cql-version"), commandLine.getOptionValues("compression"), commandLine.getOptionValue("compression-enabled"), commandLine.getOptionValue("metrics"), commandLine.getOptionValue("wait"), null, null);
             Future c1 = client1.start(vertx, commandLine.getArgumentValue("source"), commandLine.getOptionValue("source-port"), !(Boolean) commandLine.getOptionValue("disable-source-tls"), idleTimeOut);
 
-            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"), (Boolean) commandLine.getOptionValue("metrics"), credential, KeyspaceReplacer.buildFromCli(commandLine));
+            keyspaceReplacer = KeyspaceReplacer.buildFromCli(commandLine);
+            ProxyClient client2 = new ProxyClient(commandLine.getOptionValue("target-identifier"), (Boolean) commandLine.getOptionValue("metrics"), credential, keyspaceReplacer);
             Future c2 = client2.start(vertx, commandLine.getArgumentValue("target"), commandLine.getOptionValue("target-port"), !(Boolean) commandLine.getOptionValue("disable-target-tls"), idleTimeOut);
             LOG.info("Connection to both Cassandra servers up)");
             FastDecode fastDecode = FastDecode.newFixed(socket, buffer -> {
@@ -383,10 +385,27 @@ public class Proxy extends AbstractVerticle {
                                 sendMetrics(startTime, opcode, state, endTime, f1, f2, buf, client1, client2);
                             }
 
+                            // TODO: unprepared check should be outside (commandLine.getOptionValue("wait")) because prepared query will never reprepare on target?
                             if (commandLine.getOptionValue("wait")) {
                                 // check if we got an error on the target for a prepared statement
                                 if (checkUnpreparedTarget(state, f2.result())) {
-                                    writeToClientSocket(socket, client1, client2, f2.result());
+                                    //keyspaceReplacer change query so querId on source and targets are diffrent. Criver cant understand query id from target.
+                                    BufferCodec.PrimitiveBuffer buffer2 = BufferCodec.createPrimitiveBuffer(f2.result());
+                                    Frame r1 = clientCodec.decode(buffer2);
+                                    if (r1.message instanceof Unprepared) {
+                                        Unprepared error = (Unprepared) r1.message;
+                                        byte[] targetId = error.id;
+                                        byte[] sourceQId = client2.mapTargetQueryIdToSourceQueryId(targetId);
+                                        if (sourceQId != null) {
+                                            Unprepared mappedError = new Unprepared(error.message, sourceQId);
+                                            BufferCodec.PrimitiveBuffer mappedFrame = serverCodec.encode(Frame.forResponse(r1.protocolVersion, r1.streamId, r1.tracingId, r1.customPayload, r1.warnings, mappedError));
+                                            writeToClientSocket(socket, client1, client2, mappedFrame.buffer);
+                                        }else {
+                                            writeToClientSocket(socket, client1, client2, f2.result());
+                                        }
+                                    } else {
+                                        writeToClientSocket(socket, client1, client2, f2.result());
+                                    }
                                 } else {
                                     writeToClientSocket(socket, client1, client2, buf);
                                 }
